@@ -14,36 +14,42 @@ pub enum Term {
 }
 
 #[derive(Debug)]
-pub struct FarVal {
+pub struct FarVar {
     name: String,
     val: Option<u32>
 }
 
 rental! {
 pub mod rent_far {
-    use crate::FarVal;
+    use crate::FarVar;
     #[rental_mut(debug)]
     pub struct FarLam<T: 'static> {
         arg: String,
         body: Box<T>,
-        occ: Option<&'body mut FarVal>
+        occ: Option<&'body mut FarVar>
     }
 }
 }
 use self::rent_far::*;
 #[derive(Debug)]
 pub enum Far {
-    Val(FarVal),
-    Lam(FarLam<Far>)
+    Lam(FarLam<Far>),
+    App(Box<Far>,Box<Far>),
+    Var(FarVar),
 }
 
-fn find_ref<'a>(var: String, body: &'a mut Far) -> Option<&'a mut FarVal> {
+fn find_ref<'a>(var: String, body: &'a mut Far) -> Option<&'a mut FarVar> {
     match body {
-        Far::Val(val) => {
+        Far::Var(val) => {
             if *val.name == var {
                 return Some(val);
             }
             return None;
+        },
+        Far::App(left, right) => {
+            // variables are affine, so we only ever return one option
+            // lazily apply to right in case we've already found in left
+            find_ref(var.clone(), left).or_else(move || find_ref(var, right) )
         },
         Far::Lam(lam) => {
             // we need to take mutable borrows of sublambdas and rust can't guarentee we aren't
@@ -52,10 +58,11 @@ fn find_ref<'a>(var: String, body: &'a mut Far) -> Option<&'a mut FarVal> {
             struct priv_hack {
                 arg: String,
                 body: Box<Far>,
-                occ: Option<*mut FarVal>
+                occ: Option<*mut FarVar>
             }
             unsafe {
                 let raw_lam = lam as *mut FarLam<Far> as *mut priv_hack;
+                if (*raw_lam).arg == var { panic!("shadowed variable") }
                 find_ref(var, &mut (*raw_lam).body)
             }
         }
@@ -63,10 +70,10 @@ fn find_ref<'a>(var: String, body: &'a mut Far) -> Option<&'a mut FarVal> {
 }
 
 fn test_far() {
-    let val: Far = Far::Val(FarVal { name: "x".to_string(), val: None });
+    let val: Far = Far::Var(FarVar { name: "x".to_string(), val: None });
     let mut t = FarLam::new("x".to_string(),
         |arg| Box::new(val),
-        |body| { find_ref("x".to_string(),body) }); // if let Far::Val(body) = body { Some(&mut *body) } else { None } } );
+        |body| { find_ref("x".to_string(),body) }); // if let Far::Var(body) = body { Some(&mut *body) } else { None } } );
 
     t.rent_mut(|occ|
         occ.as_mut().map(|occ| occ.val = Some(13) ) );
