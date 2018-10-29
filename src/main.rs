@@ -1,4 +1,5 @@
 #[macro_use] extern crate lalrpop_util;
+#[macro_use] extern crate rental;
 
 lalrpop_mod!(pub parser);
 use self::Term::*;
@@ -9,6 +10,39 @@ pub enum Term {
     App(Box<Term>,Box<Term>),
     Var(String),
     Nat(u32)
+}
+
+rental! {
+pub mod rent_far {
+    #[rental(debug)]
+    pub struct FarVal {
+        name: String,
+        val: Option<u32>
+    }
+    #[rental_mut(debug)]
+    pub struct FarLam<T: 'static> {
+        arg: String,
+        body: Box<T>,
+        occ: &'body mut FarVal
+    }
+}
+}
+use self::rent_far::*;
+#[derive(Debug)]
+pub enum Far {
+    Val(FarVal),
+    Lam(FarLam<Far>)
+}
+
+fn test_far() {
+    let val: Far = Far::Val(FarVal::new("x".to_string(), |_| None));
+    let mut t = FarLam::new("x".to_string(),
+        |arg| Box::new(val),
+        |body| if let Far::Val(body) = body { &mut *body } else { panic!() } );
+
+    t.rent_mut(|occ| occ.rent_mut(|val| *val = Some(13) ) );
+
+    println!("wtf {:?}", t);
 }
 
 fn apply(term: Term) -> Term {
@@ -57,6 +91,7 @@ fn main() {
     let test_lam = parser::TermParser::new().parse(test).unwrap();
     println!("{:?}",test_lam);
     println!("{:?}",apply(test_lam));
+    test_far();
 }
 
 #[test]
