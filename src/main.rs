@@ -85,18 +85,17 @@ fn find_ref<'a>(var: String, body: &'a mut Far) -> Option<&'a mut FarVar> {
         Far::Lam(lam) => {
             // we need to take mutable borrows of sublambdas and rust can't guarentee we aren't
             // invalidating `occ`. this is actually safe (`occ` will never be an aliased mutable
-            // reference), but rental doesn't have an unsafe api!
-            struct priv_hack {
-                arg: String,
-                body: Box<Far>,
-                occ: Option<*mut FarVar>
+            // reference), but rental doesn't have an unsafe api!!!!
+            pub struct priv_FarLam {
+                occ: Option<&'static mut FarVar>,
+                #[allow(dead_code)]
+                lambda: __FarLam,
             }
             unsafe {
-                let raw_lam = lam as &mut FarLam as *mut FarLam as *mut priv_hack;
-                println!("dragon1 {:?}", (*raw_lam).body);
-                if (*raw_lam).arg == var { panic!("shadowed variable") }
-                println!("dragon2");
-                find_ref(var, &mut (*raw_lam).body)
+                let raw_lam = lam as &mut FarLam as *mut FarLam as *mut priv_FarLam;
+                if (*raw_lam).lambda.arg == var { panic!("shadowed variable") }
+                println!("body {:?}", (*raw_lam).lambda.body);
+                find_ref(var, &mut (*raw_lam).lambda.body)
             }
         }
     }
@@ -105,13 +104,25 @@ fn find_ref<'a>(var: String, body: &'a mut Far) -> Option<&'a mut FarVar> {
 fn run(term: Far) -> Far {
     println!("run {:?}", term);
     match term {
-        Far::App(f, arg) => {
+        Far::Var(v) => {
+            if v.val.is_some() {
+                *v.val.unwrap()
+            } else {
+                panic!("unbound variable {}", v.name);
+            }
+        },
+        Far::App(f, mut arg) => {
             let f = run(*f);
             //let arg = run(*arg);
             if let Far::Lam(mut lam) = f {
                 lam.rent_mut(|occ|
-                    occ.as_mut().map(|occ| occ.val = Some(arg) ) );
-                println!("updated? {:?}", lam);
+                occ.as_mut().map(|occ| {
+                    let mut temp = Far::Nat(FarNat { val: 32 } );
+                    std::mem::swap(&mut *arg, &mut temp);
+                    let mut temp = run(temp);
+                    std::mem::swap(&mut *arg, &mut temp);
+                    occ.val = Some(arg)
+                }));
                 run(*lam.into_head().body)
             } else {
                 panic!("apply non-lambda");
