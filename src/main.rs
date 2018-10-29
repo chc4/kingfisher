@@ -24,6 +24,7 @@ pub struct FarVar {
     val: Option<Box<Far>>
 }
 
+#[derive(Debug)]
 pub struct __FarLam {
     arg: String,
     body: Box<Far>
@@ -83,16 +84,18 @@ fn find_ref<'a>(var: String, body: &'a mut Far) -> Option<&'a mut FarVar> {
         },
         Far::Lam(lam) => {
             // we need to take mutable borrows of sublambdas and rust can't guarentee we aren't
-            // invalidating `occ`. i'm...reasonably sure this is safe: lambdas are boxed and won't
-            // be realloced, so accessing `occ` should stay safe
+            // invalidating `occ`. this is actually safe (`occ` will never be an aliased mutable
+            // reference), but rental doesn't have an unsafe api!
             struct priv_hack {
                 arg: String,
                 body: Box<Far>,
                 occ: Option<*mut FarVar>
             }
             unsafe {
-                let raw_lam = lam as *mut FarLam as *mut priv_hack;
+                let raw_lam = lam as &mut FarLam as *mut FarLam as *mut priv_hack;
+                println!("dragon1 {:?}", (*raw_lam).body);
                 if (*raw_lam).arg == var { panic!("shadowed variable") }
+                println!("dragon2");
                 find_ref(var, &mut (*raw_lam).body)
             }
         }
@@ -110,10 +113,6 @@ fn run(term: Far) -> Far {
                     occ.as_mut().map(|occ| occ.val = Some(arg) ) );
                 println!("updated? {:?}", lam);
                 run(*lam.into_head().body)
-                // into_head only returns the first member, while rent() returns the last member -
-                // guess we're doing the unsafe transmute dance again
-                // epistemic status: probably unsafe? https://github.com/jpernst/rental/issues/22
-                // mentions it may break aliasing!
             } else {
                 panic!("apply non-lambda");
             }
@@ -130,10 +129,8 @@ fn main() {
     //t.rent_mut(|occ|
     //    occ.as_mut().map(|occ| occ.val = Some(13) ) );
 
-    println!("wtf {:?}", t);
-
     let parser = parser::TermParser::new();
-    let test = parser.parse("(\\x.x) 1").unwrap();
+    let test = parser.parse(r"(\p. p (\a. \b. a)) (\t. t 1 2)").unwrap();
     println!("{:?}", test);
     println!("{:?}", run(test));
 }
