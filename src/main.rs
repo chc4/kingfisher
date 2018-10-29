@@ -14,32 +14,62 @@ pub enum Term {
 }
 
 #[derive(Debug)]
+pub struct FarNat {
+    val: u32
+}
+
+#[derive(Debug)]
 pub struct FarVar {
     name: String,
-    val: Option<u32>
+    val: Option<Box<Far>>
 }
+
+pub struct __FarLam {
+    arg: String,
+    body: Box<Far>
+}
+
+impl std::ops::Deref for __FarLam {
+    type Target = Box<Far>;
+
+    fn deref(&self) -> &<Self as std::ops::Deref>::Target {
+        &self.body
+    }
+}
+
+impl std::ops::DerefMut for __FarLam {
+    type Target = Box<Far>;
+
+    fn deref_mut<'a>(&'a mut self) -> &'a mut <Self as std::ops::Deref>::Target {
+        &mut self.body
+    }
+}
+
+// returning a box, textbook stable deref
+unsafe impl rental::__rental_prelude::StableDeref for __FarLam { }
 
 rental! {
 pub mod rent_far {
-    use crate::FarVar;
+    use crate::{__FarLam,FarVar};
     #[rental_mut(debug)]
-    pub struct FarLam<T: 'static> {
-        arg: String,
-        body: Box<T>,
-        occ: Option<&'body mut FarVar>
+    pub struct FarLam {
+        lambda: __FarLam,
+        occ: Option<&'lambda mut FarVar>
     }
 }
 }
 use self::rent_far::*;
 #[derive(Debug)]
 pub enum Far {
-    Lam(FarLam<Far>),
+    Lam(FarLam),
     App(Box<Far>,Box<Far>),
     Var(FarVar),
+    Nat(FarNat),
 }
 
 fn find_ref<'a>(var: String, body: &'a mut Far) -> Option<&'a mut FarVar> {
     match body {
+        Far::Nat(nat) => None,
         Far::Var(val) => {
             if *val.name == var {
                 return Some(val);
@@ -61,7 +91,7 @@ fn find_ref<'a>(var: String, body: &'a mut Far) -> Option<&'a mut FarVar> {
                 occ: Option<*mut FarVar>
             }
             unsafe {
-                let raw_lam = lam as *mut FarLam<Far> as *mut priv_hack;
+                let raw_lam = lam as *mut FarLam as *mut priv_hack;
                 if (*raw_lam).arg == var { panic!("shadowed variable") }
                 find_ref(var, &mut (*raw_lam).body)
             }
@@ -69,16 +99,43 @@ fn find_ref<'a>(var: String, body: &'a mut Far) -> Option<&'a mut FarVar> {
     }
 }
 
-fn test_far() {
+fn run(term: Far) -> Far {
+    println!("run {:?}", term);
+    match term {
+        Far::App(f, arg) => {
+            let f = run(*f);
+            //let arg = run(*arg);
+            if let Far::Lam(mut lam) = f {
+                lam.rent_mut(|occ|
+                    occ.as_mut().map(|occ| occ.val = Some(arg) ) );
+                println!("updated? {:?}", lam);
+                run(*lam.into_head().body)
+                // into_head only returns the first member, while rent() returns the last member -
+                // guess we're doing the unsafe transmute dance again
+                // epistemic status: probably unsafe? https://github.com/jpernst/rental/issues/22
+                // mentions it may break aliasing!
+            } else {
+                panic!("apply non-lambda");
+            }
+        },
+        _ => term
+    }
+}
+
+fn main() {
     let val: Far = Far::Var(FarVar { name: "x".to_string(), val: None });
-    let mut t = FarLam::new("x".to_string(),
-        |arg| Box::new(val),
+    let mut t = FarLam::new(__FarLam { arg: "x".to_string(), body: Box::new(val) },
         |body| { find_ref("x".to_string(),body) }); // if let Far::Var(body) = body { Some(&mut *body) } else { None } } );
 
-    t.rent_mut(|occ|
-        occ.as_mut().map(|occ| occ.val = Some(13) ) );
+    //t.rent_mut(|occ|
+    //    occ.as_mut().map(|occ| occ.val = Some(13) ) );
 
     println!("wtf {:?}", t);
+
+    let parser = parser::TermParser::new();
+    let test = parser.parse("(\\x.x) 1").unwrap();
+    println!("{:?}", test);
+    println!("{:?}", run(test));
 }
 
 fn apply(term: Term) -> Term {
@@ -121,6 +178,7 @@ fn replace(body: Term, var: String, arg: Term) -> Term {
     }
 }
 
+/*
 fn main() {
     println!("Hello, world!");
     let test = "(\\t. t 1 2) (\\a. \\b. a)";
@@ -143,6 +201,7 @@ fn parser_test() {
             Lam(y.clone(),Box::new(
                     App(Box::new(Var(x.clone())),Box::new(Var(y.clone()))))))));
 }
+*/
 
 
 

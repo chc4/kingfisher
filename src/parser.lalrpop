@@ -1,35 +1,41 @@
-use crate::Term as RTerm;
+use crate::Far;
+use crate::{FarNat,FarVar,__FarLam,FarLam,find_ref};
 use std::str::FromStr;
 
 grammar;
 
-pub Term: RTerm = {
+pub Term: Far = {
     <Lam>,
     <App>
 };
 
-pub SimpleTerm: RTerm = {
+pub SimpleTerm: Far = {
     "(" <Term> ")",
     <Var>,
     <Nat>
 };
 
-pub Lam: RTerm = {
-    "\\" <x:Ident> r"\." <body:Term> => RTerm::Lam(x, Box::new(body))
+pub Lam: Far = {
+    "\\" <x:Ident> r"\." <body:Term> => {
+        Far::Lam(FarLam::new(__FarLam { arg: x.clone(), body: Box::new(body) },
+        |body| { find_ref(x.to_string(),body) }))
+    }
 }
 
 // no one fucking told me that lalrpop automatically skips whitespace smh
-pub App: RTerm = {
+pub App: Far = {
     <SimpleTerm>,
     <l:SimpleTerm> <r:(<SimpleTerm>)+> => {
-        let mut r = r.clone();
-        r.iter_mut().fold(l, |l, r| RTerm::App(Box::new(l), Box::new(r.clone())))
+        let mut r = r;
+        r.drain(..).fold(l, move |l, mut r| Far::App(Box::new(l), Box::new(r)))
     },
 };
 
-pub Var: RTerm = {
-    <name:Ident> => RTerm::Var(name)
+pub Var: Far = {
+    <name:Ident> => Far::Var(FarVar { name: name.to_string(), val: None })
 };
 
-Nat: RTerm = <s:r"[0-9]+"> => RTerm::Nat(u32::from_str(s).unwrap());
+// these should turn into duping global variables, probably
+// just use _ for not, gensym later
+Nat: Far = <s:r"[0-9]+"> => Far::Nat(FarNat { val: u32::from_str(s).unwrap() });
 Ident: String = <str:r"[a-zA-Z]+"> => str.to_string();
