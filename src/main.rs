@@ -13,13 +13,15 @@ pub enum Term {
     Nat(u32)
 }
 
+#[derive(Debug)]
+pub struct FarVal {
+    name: String,
+    val: Option<u32>
+}
+
 rental! {
 pub mod rent_far {
-    #[rental(debug)]
-    pub struct FarVal {
-        name: String,
-        val: Option<u32>
-    }
+    use crate::FarVal;
     #[rental_mut(debug)]
     pub struct FarLam<T: 'static> {
         arg: String,
@@ -35,15 +37,39 @@ pub enum Far {
     Lam(FarLam<Far>)
 }
 
+fn find_ref<'a>(var: String, body: &'a mut Far) -> Option<&'a mut FarVal> {
+    match body {
+        Far::Val(val) => {
+            if *val.name == var {
+                return Some(val);
+            }
+            return None;
+        },
+        Far::Lam(lam) => {
+            // we need to take mutable borrows of sublambdas and rust can't guarentee we aren't
+            // invalidating `occ`. i'm...reasonably sure this is safe: lambdas are boxed and won't
+            // be realloced, so accessing `occ` should stay safe
+            struct priv_hack {
+                arg: String,
+                body: Box<Far>,
+                occ: Option<*mut FarVal>
+            }
+            unsafe {
+                let raw_lam = lam as *mut FarLam<Far> as *mut priv_hack;
+                find_ref(var, &mut (*raw_lam).body)
+            }
+        }
+    }
+}
+
 fn test_far() {
-    let val: Far = Far::Val(FarVal::new("x".to_string(), |_| None));
+    let val: Far = Far::Val(FarVal { name: "x".to_string(), val: None });
     let mut t = FarLam::new("x".to_string(),
         |arg| Box::new(val),
-        |body| if let Far::Val(body) = body { Some(&mut *body) } else { None } );
+        |body| { find_ref("x".to_string(),body) }); // if let Far::Val(body) = body { Some(&mut *body) } else { None } } );
 
     t.rent_mut(|occ|
-        occ.as_mut().map(|occ|
-        occ.rent_mut(|val| *val = Some(13) ) ) );
+        occ.as_mut().map(|occ| occ.val = Some(13) ) );
 
     println!("wtf {:?}", t);
 }
