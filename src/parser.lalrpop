@@ -1,0 +1,35 @@
+use crate::Term as RTerm;
+use std::str::FromStr;
+
+grammar;
+
+pub Term: RTerm = {
+    <Lam>,
+    <App>
+};
+
+pub SimpleTerm: RTerm = {
+    "(" <Term> ")",
+    <Var>,
+    <Nat>
+};
+
+pub Lam: RTerm = {
+    "\\" <x:Ident> r"\." <body:Term> => RTerm::Lam(x, Box::new(body))
+}
+
+// no one fucking told me that lalrpop automatically skips whitespace smh
+pub App: RTerm = {
+    <SimpleTerm>,
+    <l:SimpleTerm> <r:(<SimpleTerm>)+> => {
+        let mut r = r.clone();
+        r.iter_mut().fold(l, |l, r| RTerm::App(Box::new(l), Box::new(r.clone())))
+    },
+};
+
+pub Var: RTerm = {
+    <name:Ident> => RTerm::Var(name)
+};
+
+Nat: RTerm = <s:r"[0-9]+"> => RTerm::Nat(u32::from_str(s).unwrap());
+Ident: String = <str:r"[a-zA-Z]+"> => str.to_string();
