@@ -1,3 +1,4 @@
+#![feature(option_replace)]
 #[macro_use] extern crate lalrpop_util;
 #[macro_use] extern crate rental;
 
@@ -23,7 +24,7 @@ pub mod rent_far {
     pub struct FarLam<T: 'static> {
         arg: String,
         body: Box<T>,
-        occ: &'body mut FarVal
+        occ: Option<&'body mut FarVal>
     }
 }
 }
@@ -38,9 +39,11 @@ fn test_far() {
     let val: Far = Far::Val(FarVal::new("x".to_string(), |_| None));
     let mut t = FarLam::new("x".to_string(),
         |arg| Box::new(val),
-        |body| if let Far::Val(body) = body { &mut *body } else { panic!() } );
+        |body| if let Far::Val(body) = body { Some(&mut *body) } else { None } );
 
-    t.rent_mut(|occ| occ.rent_mut(|val| *val = Some(13) ) );
+    t.rent_mut(|occ|
+        occ.as_mut().map(|occ|
+        occ.rent_mut(|val| *val = Some(13) ) ) );
 
     println!("wtf {:?}", t);
 }
